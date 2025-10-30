@@ -108,10 +108,10 @@ export default function Home() {
   }, [])
 
   useEffect(() => {
-    if (currentSession?.messages?.length || streamingMessage) {
-      scrollToBottom()
-    }
-  }, [currentSession?.messages, streamingMessage, scrollToBottom])
+  if (currentSession?.messages?.length) {
+    scrollToBottom()
+  }
+}, [currentSession?.messages, scrollToBottom])
 
   // Автоматический размер textarea
   useEffect(() => {
