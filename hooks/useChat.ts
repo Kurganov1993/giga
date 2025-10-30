@@ -161,7 +161,7 @@ export function useChat() {
       content: content.trim(),
       role: 'user',
       timestamp: new Date(),
-      status: 'sending'
+      status: 'sending' as const
     }
 
     // Обновляем сессию
@@ -202,7 +202,7 @@ export function useChat() {
         content: data.response,
         role: 'assistant',
         timestamp: new Date(),
-        status: 'sent'
+        status: 'sent' as const
       }
 
       setSessions(prev => prev.map(session => 
@@ -211,7 +211,9 @@ export function useChat() {
               ...session,
               messages: [
                 ...session.messages.map(msg => 
-                  msg.id === userMessage.id ? { ...userMessage, status: 'sent' } : msg
+                  msg.id === userMessage.id 
+                    ? { ...msg, status: 'sent' as const }
+                    : msg
                 ), 
                 assistantMessage
               ],
@@ -233,7 +235,7 @@ export function useChat() {
         content: error instanceof Error ? error.message : 'Извините, произошла ошибка.',
         role: 'assistant',
         timestamp: new Date(),
-        status: 'error'
+        status: 'error' as const
       }
 
       setSessions(prev => prev.map(session => 
@@ -242,7 +244,9 @@ export function useChat() {
               ...session,
               messages: [
                 ...session.messages.map(msg => 
-                  msg.id === userMessage.id ? { ...userMessage, status: 'error' } : msg
+                  msg.id === userMessage.id 
+                    ? { ...msg, status: 'error' as const }
+                    : msg
                 ), 
                 errorMessage
               ],
@@ -325,7 +329,7 @@ export function useChat() {
               content: msg.content || '',
               role: msg.role || 'user',
               timestamp: new Date(msg.timestamp || Date.now()),
-              status: 'sent',
+              status: 'sent' as const,
               feedback: msg.feedback
             })),
             createdAt: new Date(importedData.session.createdAt || Date.now()),
