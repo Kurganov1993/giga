@@ -108,10 +108,10 @@ export default function Home() {
   }, [])
 
   useEffect(() => {
-  if (currentSession?.messages?.length) {
-    scrollToBottom()
-  }
-}, [currentSession?.messages, scrollToBottom])
+    if (currentSession?.messages?.length) {
+      scrollToBottom()
+    }
+  }, [currentSession?.messages, scrollToBottom])
 
   // Автоматический размер textarea
   useEffect(() => {
@@ -579,22 +579,8 @@ export default function Home() {
                   key={message.id} 
                   message={message}
                   onEdit={editMessage}
-                  onFeedback={handleMessageFeedback}
                 />
               ))}
-              
-              {streamingMessage && (
-                <div className="flex space-x-4 animate-fade-in">
-                  <div className="flex-shrink-0 w-8 h-8 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center">
-                    <Crown className="w-4 h-4 text-white" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-200">
-                      <LoadingDots />
-                    </div>
-                  </div>
-                </div>
-              )}
               
               <div ref={messagesEndRef} />
             </div>

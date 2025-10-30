@@ -5,8 +5,6 @@ import {
   AlertCircle, 
   Copy, 
   CheckCheck, 
-  ThumbsUp, 
-  ThumbsDown,
   Edit3,
   Volume2,
   VolumeX
@@ -16,15 +14,13 @@ import { useState, useRef, useEffect } from 'react'
 interface ChatMessageProps {
   message: Message
   onEdit?: (messageId: string, newContent: string) => void
-  onFeedback?: (messageId: string, feedback: 'like' | 'dislike') => void
 }
 
-export function ChatMessage({ message, onEdit, onFeedback }: ChatMessageProps) {
+export function ChatMessage({ message, onEdit }: ChatMessageProps) {
   const [copied, setCopied] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   const [editedContent, setEditedContent] = useState(message.content)
   const [isSpeaking, setIsSpeaking] = useState(false)
-  const [userFeedback, setUserFeedback] = useState<'like' | 'dislike' | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const speechRef = useRef<SpeechSynthesisUtterance | null>(null)
 
@@ -95,16 +91,6 @@ export function ChatMessage({ message, onEdit, onFeedback }: ChatMessageProps) {
   const cancelEdit = () => {
     setEditedContent(message.content)
     setIsEditing(false)
-  }
-
-  const handleFeedback = (feedback: 'like' | 'dislike') => {
-    setUserFeedback(feedback)
-    onFeedback?.(message.id, feedback)
-    
-    // Анимация подтверждения
-    setTimeout(() => {
-      // Можно убрать или оставить фидбек видимым
-    }, 2000)
   }
 
   const getStatusIcon = () => {
@@ -221,36 +207,6 @@ export function ChatMessage({ message, onEdit, onFeedback }: ChatMessageProps) {
                         <Volume2 className="w-3.5 h-3.5" />
                       )}
                     </button>
-
-                    {/* Фидбек */}
-                    {!userFeedback && (
-                      <>
-                        <button
-                          onClick={() => handleFeedback('like')}
-                          className="p-1.5 hover:bg-green-500/20 rounded-lg transition-colors"
-                          title="Понравился ответ"
-                        >
-                          <ThumbsUp className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => handleFeedback('dislike')}
-                          className="p-1.5 hover:bg-red-500/20 rounded-lg transition-colors"
-                          title="Не понравился ответ"
-                        >
-                          <ThumbsDown className="w-3.5 h-3.5" />
-                        </button>
-                      </>
-                    )}
-
-                    {userFeedback && (
-                      <div className={`px-2 py-1 rounded text-xs font-medium ${
-                        userFeedback === 'like' 
-                          ? 'bg-green-100 text-green-700' 
-                          : 'bg-red-100 text-red-700'
-                      }`}>
-                        {userFeedback === 'like' ? '👍' : '👎'}
-                      </div>
-                    )}
                   </>
                 )}
 
