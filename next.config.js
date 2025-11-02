@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   experimental: {
-    serverComponentsExternalPackages: ['node-fetch', 'https'],
+    serverComponentsExternalPackages: ['https', 'uuid'],
   },
 }
 
