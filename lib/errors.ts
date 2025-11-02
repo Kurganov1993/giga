@@ -12,7 +12,7 @@ interface ErrorMetadata {
   endpoint?: string
   details?: Record<string, any>
   retryAfter?: number
-  originalError?: string
+  originalError?: string // ДОБАВЛЕНО недостающее свойство
 }
 
 /**
@@ -97,7 +97,7 @@ export class GigaChatError extends Error {
         error.message,
         'UNKNOWN_ERROR',
         500,
-        { ...metadata, originalError: error.name }
+        { ...metadata, originalError: error.name } // Теперь это свойство разрешено
       )
     }
 
