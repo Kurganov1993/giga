@@ -12,17 +12,26 @@ import {
 } from './errors'
 import { config, configHelpers } from './config'
 
-// Динамический импорт для совместимости с Next.js
-let fetch: any;
-let https: any;
+// Динамический импорт axios для совместимости
+let axios: any;
 
 if (typeof window === 'undefined') {
   // Серверный код
-  fetch = require('node-fetch');
-  https = require('https');
+  const axiosModule = require('axios');
+  const https = require('https');
+  
+  // Создаем кастомный axios instance с отключенной проверкой SSL
+  axios = axiosModule.create({
+    httpsAgent: new https.Agent({
+      rejectUnauthorized: false,
+      keepAlive: true,
+    }),
+    timeout: config.app.apiTimeout,
+    maxRedirects: 5,
+  });
 } else {
-  // Клиентский код
-  fetch = window.fetch;
+  // Клиентский код - используем стандартный axios
+  axios = require('axios').default;
 }
 
 interface RequestOptions {
@@ -38,59 +47,34 @@ class GigaChatEnhancedService {
   private requestCounter: number = 0
 
   /**
-   * Создает HTTPS агент с отключенной проверкой SSL для Vercel
-   */
-  private createHttpsAgent() {
-    if (typeof window !== 'undefined') {
-      return undefined; // В браузере не нужен
-    }
-
-    return new https.Agent({
-      rejectUnauthorized: false,
-      keepAlive: true,
-      maxSockets: 50,
-      timeout: config.app.apiTimeout,
-    });
-  }
-
-  /**
    * Безопасный метод для выполнения HTTP запросов с таймаутом и обработкой ошибок
    */
-  private async makeRequest(url: string, options: RequestInit): Promise<Response> {
+  private async makeRequest(url: string, options: any): Promise<any> {
     const requestId = `req-${++this.requestCounter}-${uuidv4().slice(0, 8)}`
     
-    let timeoutId: NodeJS.Timeout | null = null
-    
     try {
-      const controller = new AbortController()
-      timeoutId = setTimeout(() => controller.abort(), config.app.apiTimeout)
-
-      // Подготавливаем опции для fetch
-      const fetchOptions: any = {
-        ...options,
-        signal: controller.signal,
+      const config = {
+        url,
+        method: options.method || 'GET',
         headers: {
           'User-Agent': 'GigaChat-App/1.0',
           ...options.headers,
         },
+        data: options.body,
+        timeout: config.app.apiTimeout,
       }
 
-      // Добавляем HTTPS агент для серверных запросов
-      if (typeof window === 'undefined') {
-        fetchOptions.agent = this.createHttpsAgent();
-      }
+      const response = await axios(config)
 
-      const response = await fetch(url, fetchOptions)
-
-      if (timeoutId) {
-        clearTimeout(timeoutId)
+      return {
+        ok: true,
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+        json: () => Promise.resolve(response.data),
+        text: () => Promise.resolve(JSON.stringify(response.data)),
       }
-      return response as Response
-    } catch (error) {
-      if (timeoutId) {
-        clearTimeout(timeoutId)
-      }
-
+    } catch (error: any) {
       const metadata = {
         requestId,
         url,
@@ -98,7 +82,8 @@ class GigaChatEnhancedService {
         timestamp: new Date().toISOString()
       }
 
-      if (error instanceof Error && error.name === 'AbortError') {
+      // Обработка таймаута
+      if (error.code === 'ECONNABORTED') {
         throw new TimeoutError(
           `Request timeout after ${config.app.apiTimeout}ms`,
           config.app.apiTimeout,
@@ -106,16 +91,28 @@ class GigaChatEnhancedService {
         )
       }
 
-      // Логируем детали ошибки для диагностики
-      console.error('Request Error details:', {
-        error: error instanceof Error ? error.message : 'Unknown error',
+      // Если есть response от сервера
+      if (error.response) {
+        return {
+          ok: false,
+          status: error.response.status,
+          statusText: error.response.statusText,
+          headers: error.response.headers,
+          json: () => Promise.resolve(error.response.data),
+          text: () => Promise.resolve(JSON.stringify(error.response.data)),
+        }
+      }
+
+      // Сетевая ошибка
+      console.error('Network Error details:', {
+        error: error.message,
         url,
         timestamp: new Date().toISOString(),
-        environment: typeof window === 'undefined' ? 'server' : 'client'
+        code: error.code
       })
 
       throw new NetworkError(
-        error instanceof Error ? error.message : 'Network error occurred',
+        error.message || 'Network error occurred',
         metadata
       )
     }
@@ -178,11 +175,12 @@ class GigaChatEnhancedService {
       }
 
       if (!response.ok) {
+        const errorData = await response.json()
         throw new GigaChatError(
           `Authentication failed: ${response.status} ${response.statusText}`,
           'AUTH_FAILED', 
           response.status,
-          metadata
+          { ...metadata, details: errorData }
         )
       }
 
@@ -299,7 +297,7 @@ class GigaChatEnhancedService {
       }
 
       if (!response.ok) {
-        const errorText = await response.text().catch(() => 'Unable to read error response')
+        const errorText = await response.text()
         throw new GigaChatError(
           `API request failed: ${response.status} ${response.statusText}`,
           'API_ERROR', 

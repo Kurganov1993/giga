@@ -1,14 +1,14 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   experimental: {
-    serverComponentsExternalPackages: ['uuid', 'node-fetch', 'https-proxy-agent'],
+    serverComponentsExternalPackages: ['axios', 'https', 'uuid'],
   },
   webpack: (config, { isServer }) => {
     if (isServer) {
-      config.externals.push('https', 'http');
+      config.externals.push('axios', 'https');
     }
     return config;
   }
 }
 
-module.exports = nextConfig
+module.exports = nextConfig;
