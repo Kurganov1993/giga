@@ -6,13 +6,13 @@
  */
 
 // Типы для дополнительных данных ошибок
-interface ErrorMetadata {
+export interface ErrorMetadata {
   requestId?: string
   timestamp?: string
   endpoint?: string
   details?: Record<string, any>
   retryAfter?: number
-  originalError?: string // ДОБАВЛЕНО недостающее свойство
+  originalError?: string
 }
 
 /**
