@@ -146,119 +146,120 @@ export function useChat() {
   }, [])
 
   const sendMessage = useCallback(async (content: string, options?: {
-    temperature?: number
-    streaming?: boolean
-  }) => {
-    if (!content.trim() || isLoading || content.length > MAX_MESSAGE_LENGTH) return
+  temperature?: number
+  streaming?: boolean
+}) => {
+  if (!content.trim() || isLoading || content.length > MAX_MESSAGE_LENGTH) return
 
-    // Отменяем предыдущий запрос
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort()
+  // Отменяем предыдущий запрос
+  if (abortControllerRef.current) {
+    abortControllerRef.current.abort()
+  }
+
+  const userMessage: Message = {
+    id: uuidv4(),
+    content: content.trim(),
+    role: 'user',
+    timestamp: new Date(),
+    status: 'sending' as const
+  }
+
+  // Обновляем сессию
+  setSessions(prev => prev.map(session => 
+    session.id === currentSessionId 
+      ? {
+          ...session,
+          messages: [...session.messages, userMessage],
+          updatedAt: new Date(),
+          title: session.messages.length === 0 ? generateSessionTitle(content) : session.title
+        }
+      : session
+  ))
+
+  setIsLoading(true)
+  abortControllerRef.current = new AbortController()
+
+  try {
+    // ИСПОЛЬЗУЕМ НОВЫЙ PROXY ENDPOINT
+    const response = await fetch('/api/gigachat-proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        message: content,
+        temperature: Math.max(0, Math.min(2, options?.temperature || 0.7))
+      }),
+      signal: abortControllerRef.current.signal
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
+      throw new Error(errorData.error || `HTTP error! status: ${response.status}`)
     }
 
-    const userMessage: Message = {
+    const data = await response.json()
+
+    const assistantMessage: Message = {
       id: uuidv4(),
-      content: content.trim(),
-      role: 'user',
+      content: data.response,
+      role: 'assistant',
       timestamp: new Date(),
-      status: 'sending' as const
+      status: 'sent' as const
     }
 
-    // Обновляем сессию
     setSessions(prev => prev.map(session => 
       session.id === currentSessionId 
         ? {
             ...session,
-            messages: [...session.messages, userMessage],
-            updatedAt: new Date(),
-            title: session.messages.length === 0 ? generateSessionTitle(content) : session.title
+            messages: [
+              ...session.messages.map(msg => 
+                msg.id === userMessage.id 
+                  ? { ...msg, status: 'sent' as const }
+                  : msg
+              ), 
+              assistantMessage
+            ],
+            updatedAt: new Date()
           }
         : session
     ))
 
-    setIsLoading(true)
-    abortControllerRef.current = new AbortController()
-
-    try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          message: content,
-          temperature: Math.max(0, Math.min(2, options?.temperature || 0.7))
-        }),
-        signal: abortControllerRef.current.signal
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }))
-        throw new Error(errorData.error || `HTTP error! status: ${response.status}`)
-      }
-
-      const data = await response.json()
-
-      const assistantMessage: Message = {
-        id: uuidv4(),
-        content: data.response,
-        role: 'assistant',
-        timestamp: new Date(),
-        status: 'sent' as const
-      }
-
-      setSessions(prev => prev.map(session => 
-        session.id === currentSessionId 
-          ? {
-              ...session,
-              messages: [
-                ...session.messages.map(msg => 
-                  msg.id === userMessage.id 
-                    ? { ...msg, status: 'sent' as const }
-                    : msg
-                ), 
-                assistantMessage
-              ],
-              updatedAt: new Date()
-            }
-          : session
-      ))
-
-    } catch (error) {
-      // Игнорируем ошибки отмены
-      if (error instanceof Error && error.name === 'AbortError') {
-        return
-      }
-      
-      console.error('Ошибка отправки сообщения:', error)
-      
-      const errorMessage: Message = {
-        id: uuidv4(),
-        content: error instanceof Error ? error.message : 'Извините, произошла ошибка.',
-        role: 'assistant',
-        timestamp: new Date(),
-        status: 'error' as const
-      }
-
-      setSessions(prev => prev.map(session => 
-        session.id === currentSessionId 
-          ? {
-              ...session,
-              messages: [
-                ...session.messages.map(msg => 
-                  msg.id === userMessage.id 
-                    ? { ...msg, status: 'error' as const }
-                    : msg
-                ), 
-                errorMessage
-              ],
-              updatedAt: new Date()
-            }
-          : session
-      ))
-    } finally {
-      setIsLoading(false)
-      abortControllerRef.current = null
+  } catch (error) {
+    // Игнорируем ошибки отмены
+    if (error instanceof Error && error.name === 'AbortError') {
+      return
     }
-  }, [currentSessionId, isLoading])
+    
+    console.error('Ошибка отправки сообщения:', error)
+    
+    const errorMessage: Message = {
+      id: uuidv4(),
+      content: error instanceof Error ? error.message : 'Извините, произошла ошибка.',
+      role: 'assistant',
+      timestamp: new Date(),
+      status: 'error' as const
+    }
+
+    setSessions(prev => prev.map(session => 
+      session.id === currentSessionId 
+        ? {
+            ...session,
+            messages: [
+              ...session.messages.map(msg => 
+                msg.id === userMessage.id 
+                  ? { ...msg, status: 'error' as const }
+                  : msg
+              ), 
+              errorMessage
+            ],
+            updatedAt: new Date()
+          }
+        : session
+    ))
+  } finally {
+    setIsLoading(false)
+    abortControllerRef.current = null
+  }
+}, [currentSessionId, isLoading])
 
   const clearMessages = useCallback(() => {
     setSessions(prev => prev.map(session => 
