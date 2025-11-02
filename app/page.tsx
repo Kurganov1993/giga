@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { useChat } from '@/hooks/useChat'
+import { useGigaChat } from '@/hooks/useGigaChat'
 import { 
   Plus, 
   Trash2, 
@@ -90,7 +90,7 @@ export default function Home() {
     exportSession,
     importSession,
     getSessionStats
-  } = useChat()
+  } = useGigaChat()
 
   const debouncedSearchTerm = useDebounce(searchTerm, DEBOUNCE_DELAY)
 
