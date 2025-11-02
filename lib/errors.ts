@@ -12,6 +12,7 @@ interface ErrorMetadata {
   endpoint?: string
   details?: Record<string, any>
   retryAfter?: number
+  originalError?: string
 }
 
 /**
