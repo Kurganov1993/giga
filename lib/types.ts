@@ -280,54 +280,40 @@ export const TypeGuards = {
 export const TypeUtils = {
   createMessage(partial: NewMessage): Message {
     const now = new Date()
-    return {
-      id: partial.id || `msg-${now.getTime()}-${Math.random().toString(36).substr(2, 9)}`,
+    const message: Message = {
+      id: `msg-${now.getTime()}-${Math.random().toString(36).substr(2, 9)}`,
       content: partial.content || '',
       role: partial.role || 'user',
       timestamp: now,
-      status: partial.status || 'sent',
-      ...partial
+      status: partial.status || 'sent'
     }
+
+    // Добавляем опциональные поля только если они есть
+    if (partial.feedback) message.feedback = partial.feedback
+    if (partial.edited !== undefined) message.edited = partial.edited
+    if (partial.error) message.error = partial.error
+    if (partial.tokens) message.tokens = partial.tokens
+    if (partial.metadata) message.metadata = partial.metadata
+
+    return message
   },
 
   createChatSession(partial: NewChatSession): ChatSession {
     const now = new Date()
-    return {
-      id: partial.id || `session-${now.getTime()}-${Math.random().toString(36).substr(2, 9)}`,
+    const session: ChatSession = {
+      id: `session-${now.getTime()}-${Math.random().toString(36).substr(2, 9)}`,
       title: partial.title || 'Новый чат',
       messages: partial.messages || [],
       createdAt: now,
       updatedAt: now,
-      feedback: partial.feedback || { likes: 0, dislikes: 0 },
-      settings: partial.settings,
-      ...partial
+      feedback: partial.feedback || { likes: 0, dislikes: 0 }
     }
-  }
 
-// Экспорт всех типов
-export type {
-  MessageStatus,
-  MessageRole,
-  FeedbackType,
-  GigaChatModel,
-  ChatSettings,
-  SessionFeedback,
-  Message,
-  ChatSession,
-  SessionStats,
-  GigaChatResponse,
-  GigaChatStreamResponse,
-  ApiError,
-  LoadingState,
-  ChatRequestOptions,
-  SendMessageResult,
-  ChatEvent,
-  SessionFilters,
-  PaginationParams,
-  ExportData,
-  ValidationError,
-  NewMessage,
-  NewChatSession,
-  MessageUpdate,
-  SessionUpdate
+    // Добавляем опциональные поля
+    if (partial.settings) session.settings = partial.settings
+    if (partial.metadata) session.metadata = partial.metadata
+
+    return session
+  }
 }
+

@@ -13,6 +13,8 @@ export interface ErrorMetadata {
   details?: Record<string, any>
   retryAfter?: number
   originalError?: string
+  responseBody?: string
+  responseData?: any 
 }
 
 /**
@@ -97,7 +99,10 @@ export class GigaChatError extends Error {
         error.message,
         'UNKNOWN_ERROR',
         500,
-        { ...metadata, originalError: error.name } // Теперь это свойство разрешено
+        { 
+          ...metadata, 
+          originalError: error.name 
+        } as ErrorMetadata
       )
     }
 
@@ -306,6 +311,3 @@ export const ErrorUtils = {
     return messages[error.code] || error.message
   }
 }
-
-// Экспорт типов
-export type { ErrorMetadata }

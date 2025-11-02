@@ -30,9 +30,12 @@ class GigaChatEnhancedService {
   private async makeRequest(url: string, options: RequestInit): Promise<Response> {
     const requestId = `req-${++this.requestCounter}-${uuidv4().slice(0, 8)}`
     
+    // Объявляем timeoutId ВНЕ блока try, чтобы он был доступен в catch
+    let timeoutId: NodeJS.Timeout | null = null
+    
     try {
       const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), config.app.apiTimeout)
+      timeoutId = setTimeout(() => controller.abort(), config.app.apiTimeout)
 
       const response = await fetch(url, {
         ...options,
@@ -42,7 +45,10 @@ class GigaChatEnhancedService {
       clearTimeout(timeoutId)
       return response
     } catch (error) {
-      clearTimeout(timeoutId)
+      // Теперь timeoutId доступен здесь
+      if (timeoutId) {
+        clearTimeout(timeoutId)
+      }
 
       const metadata = {
         requestId,
