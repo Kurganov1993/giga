@@ -12,6 +12,19 @@ import {
 } from './errors'
 import { config, configHelpers } from './config'
 
+// Динамический импорт для совместимости с Next.js
+let fetch: any;
+let https: any;
+
+if (typeof window === 'undefined') {
+  // Серверный код
+  fetch = require('node-fetch');
+  https = require('https');
+} else {
+  // Клиентский код
+  fetch = window.fetch;
+}
+
 interface RequestOptions {
   temperature?: number
   maxTokens?: number
@@ -25,6 +38,22 @@ class GigaChatEnhancedService {
   private requestCounter: number = 0
 
   /**
+   * Создает HTTPS агент с отключенной проверкой SSL для Vercel
+   */
+  private createHttpsAgent() {
+    if (typeof window !== 'undefined') {
+      return undefined; // В браузере не нужен
+    }
+
+    return new https.Agent({
+      rejectUnauthorized: false,
+      keepAlive: true,
+      maxSockets: 50,
+      timeout: config.app.apiTimeout,
+    });
+  }
+
+  /**
    * Безопасный метод для выполнения HTTP запросов с таймаутом и обработкой ошибок
    */
   private async makeRequest(url: string, options: RequestInit): Promise<Response> {
@@ -36,22 +65,27 @@ class GigaChatEnhancedService {
       const controller = new AbortController()
       timeoutId = setTimeout(() => controller.abort(), config.app.apiTimeout)
 
-      // Для продакшена используем стандартный fetch
-      // Vercel автоматически обрабатывает SSL сертификаты
-      const response = await fetch(url, {
+      // Подготавливаем опции для fetch
+      const fetchOptions: any = {
         ...options,
         signal: controller.signal,
-        // Добавляем headers для лучшей совместимости
         headers: {
           'User-Agent': 'GigaChat-App/1.0',
           ...options.headers,
         },
-      })
+      }
+
+      // Добавляем HTTPS агент для серверных запросов
+      if (typeof window === 'undefined') {
+        fetchOptions.agent = this.createHttpsAgent();
+      }
+
+      const response = await fetch(url, fetchOptions)
 
       if (timeoutId) {
         clearTimeout(timeoutId)
       }
-      return response
+      return response as Response
     } catch (error) {
       if (timeoutId) {
         clearTimeout(timeoutId)
@@ -76,7 +110,8 @@ class GigaChatEnhancedService {
       console.error('Request Error details:', {
         error: error instanceof Error ? error.message : 'Unknown error',
         url,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        environment: typeof window === 'undefined' ? 'server' : 'client'
       })
 
       throw new NetworkError(
