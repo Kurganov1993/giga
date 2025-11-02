@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { Message, ChatSession } from '@/lib/types'
 import { v4 as uuidv4 } from 'uuid'
 
@@ -35,8 +35,8 @@ export function useGigaChat() {
   const abortControllerRef = useRef<AbortController | null>(null)
 
   // Загрузка сессий из localStorage
-  const initialize = useCallback(() => {
-    if (typeof window !== 'undefined' && !isInitialized) {
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
       try {
         const saved = localStorage.getItem(STORAGE_KEY)
         if (saved) {
@@ -69,10 +69,10 @@ export function useGigaChat() {
         setIsInitialized(true)
       }
     }
-  }, [isInitialized])
+  }, [])
 
   // Сохранение сессий в localStorage
-  const saveSessions = useCallback(() => {
+  useEffect(() => {
     if (typeof window !== 'undefined' && isInitialized && sessions.length > 0) {
       try {
         const sessionsToSave = sessions.slice(0, MAX_SESSIONS)
@@ -107,8 +107,129 @@ export function useGigaChat() {
     })
   }, [currentSessionId])
 
+  // ДОБАВЛЕННЫЕ ФУНКЦИИ
+  const editMessage = useCallback((messageId: string, newContent: string) => {
+    if (!newContent.trim() || newContent.length > MAX_MESSAGE_LENGTH) return
+    
+    setSessions(prev => prev.map(session => 
+      session.id === currentSessionId 
+        ? {
+            ...session,
+            messages: session.messages.map(msg => 
+              msg.id === messageId 
+                ? { ...msg, content: newContent.trim(), edited: true, updatedAt: new Date() }
+                : msg
+            ),
+            updatedAt: new Date()
+          }
+        : session
+    ))
+  }, [currentSessionId])
+
+  const exportSession = useCallback((sessionId: string) => {
+    const session = sessions.find(s => s.id === sessionId)
+    if (!session) return false
+
+    try {
+      const exportData = {
+        version: '1.0',
+        exportedAt: new Date().toISOString(),
+        session: {
+          ...session,
+          messages: session.messages.map(msg => ({
+            ...msg,
+            timestamp: msg.timestamp.toISOString()
+          }))
+        }
+      }
+
+      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `chat-${session.title}-${new Date().toISOString().split('T')[0]}.json`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      
+      return true
+    } catch (error) {
+      console.error('Ошибка экспорта:', error)
+      return false
+    }
+  }, [sessions])
+
+  const importSession = useCallback((file: File): Promise<boolean> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader()
+      
+      reader.onload = (e) => {
+        try {
+          const content = e.target?.result as string
+          if (!content) throw new Error('Файл пуст')
+
+          const importedData = JSON.parse(content)
+          if (!importedData.session || !Array.isArray(importedData.session.messages)) {
+            throw new Error('Неверный формат файла')
+          }
+
+          const importedSession: ChatSession = {
+            ...importedData.session,
+            id: uuidv4(),
+            messages: importedData.session.messages.map((msg: any) => ({
+              id: msg.id || uuidv4(),
+              content: msg.content || '',
+              role: msg.role || 'user',
+              timestamp: new Date(msg.timestamp || Date.now()),
+              status: 'sent' as const,
+              feedback: msg.feedback
+            })),
+            createdAt: new Date(importedData.session.createdAt || Date.now()),
+            updatedAt: new Date(),
+            feedback: importedData.session.feedback || { likes: 0, dislikes: 0 },
+            title: importedData.session.title || 'Импортированный чат'
+          }
+
+          setSessions(prev => [importedSession, ...prev])
+          setCurrentSessionId(importedSession.id)
+          resolve(true)
+          
+        } catch (error) {
+          console.error('Ошибка импорта:', error)
+          resolve(false)
+        }
+      }
+      
+      reader.onerror = () => resolve(false)
+      reader.readAsText(file)
+    })
+  }, [])
+
+  const getSessionStats = useCallback((sessionId: string) => {
+    const session = sessions.find(s => s.id === sessionId)
+    if (!session) return null
+
+    const userMessages = session.messages.filter(m => m.role === 'user').length
+    const assistantMessages = session.messages.filter(m => m.role === 'assistant').length
+    const totalMessages = userMessages + assistantMessages
+
+    return {
+      userMessages,
+      assistantMessages,
+      totalMessages,
+      totalTokens: 0,
+      likes: session.feedback?.likes || 0,
+      dislikes: session.feedback?.dislikes || 0,
+      satisfactionRate: session.feedback?.likes && session.feedback?.dislikes 
+        ? (session.feedback.likes / (session.feedback.likes + session.feedback.dislikes)) * 100
+        : 0
+    }
+  }, [sessions])
+
   const sendMessage = useCallback(async (content: string, options?: {
     temperature?: number
+    streaming?: boolean
   }) => {
     if (!content.trim() || isLoading || content.length > MAX_MESSAGE_LENGTH) return
 
@@ -141,7 +262,6 @@ export function useGigaChat() {
     abortControllerRef.current = new AbortController()
 
     try {
-      // ИСПОЛЬЗУЕМ ПРАВИЛЬНЫЙ ENDPOINT
       const response = await fetch('/api/gigachat-proxy', {
         method: 'POST',
         headers: { 
@@ -250,15 +370,14 @@ export function useGigaChat() {
     setIsLoading(false)
   }, [])
 
-  // Инициализация при монтировании
-  useState(() => {
-    initialize()
-  })
-
-  // Автосохранение
-  useState(() => {
-    saveSessions()
-  })
+  // Очистка при размонтировании
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+      }
+    }
+  }, [])
 
   return {
     // Состояние
@@ -273,6 +392,10 @@ export function useGigaChat() {
     sendMessage,
     clearMessages,
     setCurrentSessionId,
+    editMessage,
+    exportSession,
+    importSession,
+    getSessionStats,
     cancelRequest
   }
 }
