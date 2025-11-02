@@ -90,29 +90,31 @@ export class GigaChatError extends Error {
    * Создание ошибки из исключения
    */
   static fromError(error: unknown, metadata?: ErrorMetadata): GigaChatError {
-    if (error instanceof GigaChatError) {
-      return error
-    }
+  if (error instanceof GigaChatError) {
+    return error
+  }
 
-    if (error instanceof Error) {
-      return new GigaChatError(
-        error.message,
-        'UNKNOWN_ERROR',
-        500,
-        { 
-          ...metadata, 
-          originalError: error.name 
-        } as ErrorMetadata
-      )
-    }
-
+  if (error instanceof Error) {
+    // Создаем расширенный объект метаданных
+    const enhancedMetadata: ErrorMetadata & { originalError: string } = {
+      ...metadata,
+      originalError: error.name
+    };
+    
     return new GigaChatError(
-      'An unknown error occurred',
+      error.message,
       'UNKNOWN_ERROR',
       500,
-      metadata
+      enhancedMetadata
     )
   }
+
+  return new GigaChatError(
+    'An unknown error occurred',
+    'UNKNOWN_ERROR',
+    500,
+    metadata
+  )
 }
 
 /**
