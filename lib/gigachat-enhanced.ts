@@ -30,22 +30,29 @@ class GigaChatEnhancedService {
   private async makeRequest(url: string, options: RequestInit): Promise<Response> {
     const requestId = `req-${++this.requestCounter}-${uuidv4().slice(0, 8)}`
     
-    // Объявляем timeoutId ВНЕ блока try, чтобы он был доступен в catch
     let timeoutId: NodeJS.Timeout | null = null
     
     try {
       const controller = new AbortController()
       timeoutId = setTimeout(() => controller.abort(), config.app.apiTimeout)
 
+      // Для продакшена используем стандартный fetch
+      // Vercel автоматически обрабатывает SSL сертификаты
       const response = await fetch(url, {
         ...options,
-        signal: controller.signal
+        signal: controller.signal,
+        // Добавляем headers для лучшей совместимости
+        headers: {
+          'User-Agent': 'GigaChat-App/1.0',
+          ...options.headers,
+        },
       })
 
-      clearTimeout(timeoutId)
+      if (timeoutId) {
+        clearTimeout(timeoutId)
+      }
       return response
     } catch (error) {
-      // Теперь timeoutId доступен здесь
       if (timeoutId) {
         clearTimeout(timeoutId)
       }
@@ -65,6 +72,13 @@ class GigaChatEnhancedService {
         )
       }
 
+      // Логируем детали ошибки для диагностики
+      console.error('Request Error details:', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        url,
+        timestamp: new Date().toISOString()
+      })
+
       throw new NetworkError(
         error instanceof Error ? error.message : 'Network error occurred',
         metadata
@@ -77,16 +91,14 @@ class GigaChatEnhancedService {
    */
   private async getAccessToken(): Promise<string> {
     // Проверяем валидный кэшированный токен
-    if (this.accessToken && Date.now() < this.tokenExpiresAt - 60000) { // Запас 1 минута
+    if (this.accessToken && Date.now() < this.tokenExpiresAt - 60000) {
       return this.accessToken
     }
 
-    // Если уже идет обновление токена, ждем его
     if (this.tokenRefreshPromise) {
       return this.tokenRefreshPromise
     }
 
-    // Создаем promise для обновления токена
     this.tokenRefreshPromise = this.refreshAccessToken()
     
     try {
@@ -149,13 +161,11 @@ class GigaChatEnhancedService {
         throw new AuthenticationError('No access token in response', metadata)
       }
 
-      // Вычисляем время истечения токена
       if (data.expires_at) {
-        this.tokenExpiresAt = data.expires_at * 1000 // конвертируем в миллисекунды
+        this.tokenExpiresAt = data.expires_at * 1000
       } else if (data.expires_in) {
-        this.tokenExpiresAt = Date.now() + (data.expires_in * 1000) - 60000 // вычитаем запас
+        this.tokenExpiresAt = Date.now() + (data.expires_in * 1000) - 60000
       } else {
-        // Дефолтное время жизни токена - 30 минут
         this.tokenExpiresAt = Date.now() + (30 * 60 * 1000) - 60000
       }
 
@@ -166,7 +176,6 @@ class GigaChatEnhancedService {
       return this.accessToken
 
     } catch (error) {
-      // Сбрасываем токен при ошибках аутентификации
       if (error instanceof AuthenticationError) {
         this.accessToken = null
         this.tokenExpiresAt = 0
@@ -191,7 +200,6 @@ class GigaChatEnhancedService {
       )
     }
 
-    // Проверяем на наличие только пробельных символов
     if (/^\s*$/.test(message)) {
       throw new ValidationError('Message cannot be empty or contain only whitespace')
     }
@@ -210,7 +218,6 @@ class GigaChatEnhancedService {
     }
 
     try {
-      // Валидация входных данных
       this.validateMessage(message)
 
       const accessToken = await this.getAccessToken()
@@ -226,7 +233,7 @@ class GigaChatEnhancedService {
         temperature: configHelpers.validateTemperature(options.temperature || config.gigachat.temperature.default),
         max_tokens: options.maxTokens || config.gigachat.maxTokens,
         stream: options.stream !== undefined ? options.stream : config.features.enableStreaming,
-        top_p: 0.9, // Добавляем для лучшего контроля качества
+        top_p: 0.9,
       }
 
       const response = await this.makeRequest(`${config.gigachat.apiUrl}/chat/completions`, {
@@ -239,9 +246,7 @@ class GigaChatEnhancedService {
         body: JSON.stringify(requestBody),
       })
 
-      // Обработка специфических HTTP статусов
       if (response.status === 401) {
-        // Инвалидируем токен и повторяем запрос один раз
         this.accessToken = null
         this.tokenExpiresAt = 0
         
@@ -264,7 +269,12 @@ class GigaChatEnhancedService {
           `API request failed: ${response.status} ${response.statusText}`,
           'API_ERROR', 
           response.status,
-          { ...metadata, responseBody: errorText.slice(0, 500) } // Ограничиваем длину лога
+          { 
+            ...metadata, 
+            details: {
+              responseBody: errorText.slice(0, 500)
+            }
+          }
         )
       }
 
@@ -275,7 +285,12 @@ class GigaChatEnhancedService {
           'Invalid response format from GigaChat', 
           'INVALID_RESPONSE',
           502,
-          { ...metadata, responseData: data }
+          { 
+            ...metadata, 
+            details: {
+              responseData: data
+            }
+          }
         )
       }
 
@@ -340,5 +355,4 @@ class GigaChatEnhancedService {
   }
 }
 
-// Создаем синглтон экземпляр
 export const gigaChatEnhancedService = new GigaChatEnhancedService()

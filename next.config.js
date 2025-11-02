@@ -1,20 +1,30 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   experimental: {
-    appDir: true,
+    serverComponentsExternalPackages: ['uuid'],
   },
-  // Для продакшена
-  env: {
-    GIGACHAT_CLIENT_ID: process.env.GIGACHAT_CLIENT_ID,
-    GIGACHAT_CLIENT_SECRET: process.env.GIGACHAT_CLIENT_SECRET,
-  },
-  // Увеличиваем таймауты для API запросов
   serverRuntimeConfig: {
-    apiTimeout: 30000,
+    apiTimeout: 60000,
   },
-  publicRuntimeConfig: {
-    apiBaseUrl: process.env.API_BASE_URL || '',
+  api: {
+    bodyParser: {
+      sizeLimit: '4mb',
+    },
+    responseLimit: '4mb',
   },
+  async headers() {
+    return [
+      {
+        source: '/api/(.*)',
+        headers: [
+          { key: 'Access-Control-Allow-Credentials', value: 'true' },
+          { key: 'Access-Control-Allow-Origin', value: '*' },
+          { key: 'Access-Control-Allow-Methods', value: 'GET,OPTIONS,PATCH,DELETE,POST,PUT' },
+          { key: 'Access-Control-Allow-Headers', value: 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version' },
+        ]
+      }
+    ]
+  }
 }
 
 module.exports = nextConfig
