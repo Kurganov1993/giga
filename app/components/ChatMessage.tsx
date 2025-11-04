@@ -7,22 +7,51 @@ import {
   CheckCheck, 
   Edit3,
   Volume2,
-  VolumeX
+  VolumeX,
+  Bug
 } from 'lucide-react'
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react'
+import { useSaluteSpeech } from '@/hooks/useSaluteSpeech'
 
 interface ChatMessageProps {
   message: Message
   onEdit?: (messageId: string, newContent: string) => void
   isMobile?: boolean
+  autoSpeech?: boolean
 }
 
-export function ChatMessage({ message, onEdit, isMobile = false }: ChatMessageProps) {
+export const ChatMessage = memo(function ChatMessage({ 
+  message, 
+  onEdit, 
+  isMobile = false, 
+  autoSpeech = false 
+}: ChatMessageProps) {
   const [copied, setCopied] = useState(false)
   const [isEditing, setIsEditing] = useState(false)
   const [editedContent, setEditedContent] = useState(message.content)
-  const [isSpeaking, setIsSpeaking] = useState(false)
+  const [showDebug, setShowDebug] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  
+  const { 
+    isSpeaking, 
+    isReady, 
+    speak, 
+    stop, 
+    error,
+    debugLog
+  } = useSaluteSpeech()
+
+  // Автоматическое озвучивание AI сообщений
+  useEffect(() => {
+    if (autoSpeech && message.role === 'assistant' && !isSpeaking && isReady) {
+      const timer = setTimeout(() => {
+        console.log('Auto-speech triggered for:', message.content.substring(0, 50))
+        speak(message.content)
+      }, 1000)
+      
+      return () => clearTimeout(timer)
+    }
+  }, []) // Убраны зависимости чтобы избежать повторных вызовов
 
   useEffect(() => {
     if (isEditing && textareaRef.current) {
@@ -31,7 +60,7 @@ export function ChatMessage({ message, onEdit, isMobile = false }: ChatMessagePr
     }
   }, [isEditing, editedContent])
 
-  const copyToClipboard = async () => {
+  const copyToClipboard = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(message.content)
       setCopied(true)
@@ -39,36 +68,42 @@ export function ChatMessage({ message, onEdit, isMobile = false }: ChatMessagePr
     } catch (err) {
       console.error('Ошибка копирования:', err)
     }
-  }
+  }, [message.content])
 
-  const toggleSpeech = () => {
-    if (isSpeaking) {
-      window.speechSynthesis.cancel()
-      setIsSpeaking(false)
-    } else {
-      const utterance = new SpeechSynthesisUtterance(message.content)
-      utterance.lang = 'ru-RU'
-      utterance.rate = 0.9
-      utterance.onend = () => setIsSpeaking(false)
-      utterance.onerror = () => setIsSpeaking(false)
-      window.speechSynthesis.speak(utterance)
-      setIsSpeaking(true)
+  const toggleSpeech = useCallback(async () => {
+    console.log('Toggle speech clicked, isSpeaking:', isSpeaking, 'isReady:', isReady)
+    try {
+      if (isSpeaking) {
+        stop()
+      } else {
+        await speak(message.content)
+      }
+    } catch (err) {
+      console.error('Ошибка озвучивания:', err)
     }
-  }
+  }, [isSpeaking, isReady, stop, speak, message.content])
 
-  const handleEdit = () => {
+  const handleEdit = useCallback(() => {
     if (isEditing && editedContent !== message.content) {
       onEdit?.(message.id, editedContent)
     }
     setIsEditing(!isEditing)
-  }
+  }, [isEditing, editedContent, message.content, message.id, onEdit])
 
-  const cancelEdit = () => {
+  const cancelEdit = useCallback(() => {
     setEditedContent(message.content)
     setIsEditing(false)
-  }
+  }, [message.content])
 
-  const getStatusIcon = () => {
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      cancelEdit()
+    } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      handleEdit()
+    }
+  }, [cancelEdit, handleEdit])
+
+  const getStatusIcon = useCallback(() => {
     switch (message.status) {
       case 'sending':
         return <Clock className="w-3 h-3 text-yellow-500 animate-pulse" />
@@ -79,14 +114,24 @@ export function ChatMessage({ message, onEdit, isMobile = false }: ChatMessagePr
       default:
         return null
     }
-  }
+  }, [message.status])
 
-  const formatTimestamp = (timestamp: Date) => {
+  const formatTimestamp = useCallback((timestamp: Date) => {
     return new Date(timestamp).toLocaleTimeString('ru-RU', {
       hour: '2-digit',
       minute: '2-digit'
     })
-  }
+  }, [])
+
+  const recentDebugLog = useMemo(() => 
+    debugLog.slice(-5), 
+    [debugLog]
+  )
+
+  const canSpeak = useMemo(() => 
+    message.content.trim().length > 0, 
+    [message.content]
+  )
 
   const isUser = message.role === 'user'
 
@@ -112,6 +157,7 @@ export function ChatMessage({ message, onEdit, isMobile = false }: ChatMessagePr
               ref={textareaRef}
               value={editedContent}
               onChange={(e) => setEditedContent(e.target.value)}
+              onKeyDown={handleKeyDown}
               className="w-full bg-white border border-gray-300 rounded-lg p-2 text-gray-800 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
               rows={3}
               autoFocus
@@ -140,27 +186,51 @@ export function ChatMessage({ message, onEdit, isMobile = false }: ChatMessagePr
             <div className={`flex items-center justify-between mt-2 text-xs ${
               isUser ? 'text-blue-100' : 'text-gray-500'
             }`}>
-              <span>{formatTimestamp(message.timestamp)}</span>
+              <div className="flex items-center space-x-2">
+                <span>{formatTimestamp(message.timestamp)}</span>
+                {getStatusIcon()}
+              </div>
               
               <div className="flex items-center space-x-1">
                 {!isUser && (
-                  <button
-                    onClick={toggleSpeech}
-                    className="p-1 hover:bg-white/20 rounded transition-colors"
-                    title={isSpeaking ? "Остановить" : "Озвучить"}
-                  >
-                    {isSpeaking ? (
-                      <VolumeX className="w-3 h-3" />
+                  <>
+                    {!isReady && !isSpeaking ? (
+                      <div className="p-1" title="Система речи загружается">
+                        <Clock className="w-3 h-3 animate-spin" />
+                      </div>
                     ) : (
-                      <Volume2 className="w-3 h-3" />
+                      <button
+                        onClick={toggleSpeech}
+                        className="p-1 hover:bg-white/20 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        title={isSpeaking ? "Остановить" : "Озвучить"}
+                        disabled={!isReady || !canSpeak}
+                        aria-label={isSpeaking ? "Остановить воспроизведение" : "Озвучить сообщение"}
+                        aria-live="polite"
+                      >
+                        {isSpeaking ? (
+                          <VolumeX className="w-3 h-3" />
+                        ) : (
+                          <Volume2 className="w-3 h-3" />
+                        )}
+                      </button>
                     )}
-                  </button>
+
+                    <button
+                      onClick={() => setShowDebug(!showDebug)}
+                      className="p-1 hover:bg-white/20 rounded transition-colors"
+                      title="Отладка"
+                      aria-label="Показать отладочную информацию"
+                    >
+                      <Bug className="w-3 h-3" />
+                    </button>
+                  </>
                 )}
 
                 <button
                   onClick={copyToClipboard}
                   className="p-1 hover:bg-white/20 rounded transition-colors"
                   title="Копировать"
+                  aria-label="Копировать сообщение"
                 >
                   {copied ? (
                     <CheckCheck className="w-3 h-3" />
@@ -174,12 +244,30 @@ export function ChatMessage({ message, onEdit, isMobile = false }: ChatMessagePr
                     onClick={handleEdit}
                     className="p-1 hover:bg-white/20 rounded transition-colors"
                     title="Редактировать"
+                    aria-label="Редактировать сообщение"
                   >
                     <Edit3 className="w-3 h-3" />
                   </button>
                 )}
               </div>
             </div>
+
+            {/* Отладочная информация */}
+            {showDebug && !isUser && (
+              <div className="mt-3 p-2 bg-gray-100 rounded text-xs">
+                <div className="font-mono">
+                  <div>Готов: {isReady ? '✅' : '❌'}</div>
+                  <div>Озвучка: {isSpeaking ? '▶️' : '⏸️'}</div>
+                  <div>Может говорить: {canSpeak ? '✅' : '❌'}</div>
+                  {error && <div className="text-red-600">Ошибка: {error}</div>}
+                  <div className="mt-1 max-h-20 overflow-y-auto">
+                    {recentDebugLog.map((log, i) => (
+                      <div key={i} className="text-gray-600">{log}</div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -194,4 +282,4 @@ export function ChatMessage({ message, onEdit, isMobile = false }: ChatMessagePr
       )}
     </div>
   )
-}
+})

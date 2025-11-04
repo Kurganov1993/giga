@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useGigaChat } from '@/hooks/useGigaChat'
+import { useSaluteSpeech } from '@/hooks/useSaluteSpeech'
 import { 
   Plus, 
   Trash2, 
@@ -18,7 +19,9 @@ import {
   Volume2,
   VolumeX,
   Zap,
-  Crown
+  Crown,
+  Mic,
+  MicOff
 } from 'lucide-react'
 import { ChatMessage } from './components/ChatMessage'
 import { LoadingDots } from './components/LoadingDots'
@@ -92,6 +95,14 @@ export default function Home() {
     getSessionStats
   } = useGigaChat()
 
+  const {
+    isReady: isSpeechReady,
+    isSpeaking,
+    availableVoices: speechVoices,
+    speak: speakText,
+    stop: stopSpeech
+  } = useSaluteSpeech()
+
   const debouncedSearchTerm = useDebounce(searchTerm, DEBOUNCE_DELAY)
 
   // Автоматическая прокрутка к новым сообщениям
@@ -121,6 +132,13 @@ export default function Home() {
       textareaRef.current.style.height = `${newHeight}px`
     }
   }, [input])
+
+  // Остановка речи при смене сессии или очистке
+  useEffect(() => {
+    return () => {
+      stopSpeech()
+    }
+  }, [currentSession?.id, stopSpeech])
 
   // Валидация температуры
   const handleTemperatureChange = useCallback((value: number) => {
@@ -259,6 +277,13 @@ export default function Home() {
     }
   }, [setCurrentSessionId])
 
+  // Остановка речи при закрытии приложения
+  useEffect(() => {
+    return () => {
+      stopSpeech()
+    }
+  }, [stopSpeech])
+
   // Закрытие sidebar при нажатии Escape
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
@@ -375,6 +400,7 @@ export default function Home() {
                       onClick={() => {
                         setCurrentSessionId(session.id)
                         setSidebarOpen(false)
+                        stopSpeech() // Останавливаем речь при смене сессии
                       }}
                       role="button"
                       tabIndex={0}
@@ -456,8 +482,20 @@ export default function Home() {
                 </div>
               )}
             </div>
-            <div className="text-xs text-gray-500 text-center">
-              Powered by <span className="font-semibold text-blue-600">GigaChat AI</span>
+            <div className="flex items-center justify-between text-xs text-gray-500">
+              <span>
+                Powered by <span className="font-semibold text-blue-600">GigaChat AI</span>
+              </span>
+              <div className="flex items-center space-x-1">
+                {isSpeechReady ? (
+                  <Mic className="w-3 h-3 text-green-500" />
+                ) : (
+                  <MicOff className="w-3 h-3 text-gray-400" />
+                )}
+                <span className={isSpeechReady ? 'text-green-600' : 'text-gray-400'}>
+                  SaluteSpeech
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -490,6 +528,24 @@ export default function Home() {
             </div>
             
             <div className="flex items-center space-x-3">
+              {isSpeaking && (
+                <div className="flex items-center space-x-2 px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg text-sm">
+                  <div className="flex space-x-1">
+                    <div className="w-1 h-3 bg-blue-500 animate-pulse"></div>
+                    <div className="w-1 h-3 bg-blue-500 animate-pulse" style={{ animationDelay: '0.1s' }}></div>
+                    <div className="w-1 h-3 bg-blue-500 animate-pulse" style={{ animationDelay: '0.2s' }}></div>
+                  </div>
+                  <span>Озвучка...</span>
+                  <button
+                    onClick={stopSpeech}
+                    className="p-1 hover:bg-blue-200 rounded transition-colors"
+                    aria-label="Остановить озвучку"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
+              
               {isLoading && (
                 <button
                   onClick={cancelRequest}
@@ -515,6 +571,7 @@ export default function Home() {
                     onClick={() => {
                       if (window.confirm('Вы уверены, что хотите очистить историю сообщений?')) {
                         clearMessages()
+                        stopSpeech()
                       }
                     }}
                     className="px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors font-medium"
@@ -563,14 +620,28 @@ export default function Home() {
                   <span>Быстрые ответы</span>
                 </div>
                 <div className="flex items-center space-x-1">
-                  <Volume2 className="w-4 h-4 text-blue-500" />
-                  <span>Озвучка сообщений</span>
+                  {isSpeechReady ? (
+                    <Volume2 className="w-4 h-4 text-blue-500" />
+                  ) : (
+                    <VolumeX className="w-4 h-4 text-gray-400" />
+                  )}
+                  <span className={isSpeechReady ? 'text-blue-600' : 'text-gray-400'}>
+                    SaluteSpeech
+                  </span>
                 </div>
                 <div className="flex items-center space-x-1">
                   <Download className="w-4 h-4 text-purple-500" />
                   <span>Экспорт чатов</span>
                 </div>
               </div>
+
+              {!isSpeechReady && (
+                <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                  <p className="text-sm text-yellow-800">
+                    SaluteSpeech загружается... Озвучка будет доступна через несколько секунд.
+                  </p>
+                </div>
+              )}
             </div>
           ) : (
             <div className="space-y-6 max-w-4xl mx-auto pb-4">
@@ -579,6 +650,7 @@ export default function Home() {
                   key={message.id} 
                   message={message}
                   onEdit={editMessage}
+                  autoSpeech={autoSpeech}
                 />
               ))}
               
@@ -586,6 +658,8 @@ export default function Home() {
             </div>
           )}
         </div>
+
+        
 
         {/* Input Area */}
         <div className="border-t border-gray-200/50 bg-white/80 backdrop-blur-sm p-6">
@@ -632,11 +706,16 @@ export default function Home() {
                 <span className={input.length > MAX_INPUT_LENGTH * 0.9 ? 'text-orange-500' : ''}>
                   {input.length}/{MAX_INPUT_LENGTH}
                 </span>
-                {autoSpeech ? (
-                  <Volume2 className="w-4 h-4 text-blue-500" />
-                ) : (
-                  <VolumeX className="w-4 h-4 text-gray-400" />
-                )}
+                <div className="flex items-center space-x-1">
+                  {autoSpeech ? (
+                    <Volume2 className="w-4 h-4 text-blue-500" />
+                  ) : (
+                    <VolumeX className="w-4 h-4 text-gray-400" />
+                  )}
+                  <span className={autoSpeech ? 'text-blue-600' : 'text-gray-400'}>
+                    Авто-озвучка
+                  </span>
+                </div>
               </div>
             </div>
           </div>
@@ -693,7 +772,7 @@ export default function Home() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="font-medium text-gray-900">Авто-озвучка</p>
-                  <p className="text-sm text-gray-500">Автоматически озвучивать ответы</p>
+                  <p className="text-sm text-gray-500">Автоматически озвучивать ответы AI</p>
                 </div>
                 <button
                   onClick={() => setAutoSpeech(!autoSpeech)}
@@ -730,6 +809,30 @@ export default function Home() {
                   <span>Более точный</span>
                   <span>Более креативный</span>
                 </div>
+              </div>
+
+              {/* Статус SaluteSpeech */}
+              <div className="p-3 bg-gray-50 rounded-lg">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-medium text-gray-900">SaluteSpeech</span>
+                  {isSpeechReady ? (
+                    <div className="flex items-center space-x-1 text-green-600">
+                      <Mic className="w-4 h-4" />
+                      <span className="text-sm">Готов</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center space-x-1 text-yellow-600">
+                      <MicOff className="w-4 h-4" />
+                      <span className="text-sm">Загрузка...</span>
+                    </div>
+                  )}
+                </div>
+                <p className="text-xs text-gray-500">
+                  {isSpeechReady 
+                    ? 'Высококачественный синтез речи от Сбера' 
+                    : 'Инициализация голосового синтезатора...'
+                  }
+                </p>
               </div>
             </div>
             
