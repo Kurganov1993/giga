@@ -65,6 +65,14 @@ function useDebounce<T>(value: T, delay: number): T {
   return debouncedValue
 }
 
+// Declare Speech Recognition types
+declare global {
+  interface Window {
+    webkitSpeechRecognition: any
+    SpeechRecognition: any
+  }
+}
+
 export default function Home() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [input, setInput] = useState('')
@@ -74,9 +82,14 @@ export default function Home() {
   const [useStreaming, setUseStreaming] = useState(true)
   const [temperature, setTemperature] = useState(0.7)
   const [isImporting, setIsImporting] = useState(false)
+  const [isListening, setIsListening] = useState(false)
+  const [speechError, setSpeechError] = useState<string | null>(null)
+  const [interimText, setInterimText] = useState('')
+  
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const recognitionRef = useRef<any>(null)
   
   const {
     sessions,
@@ -104,6 +117,150 @@ export default function Home() {
   } = useSaluteSpeech()
 
   const debouncedSearchTerm = useDebounce(searchTerm, DEBOUNCE_DELAY)
+
+  // Проверка поддержки распознавания речи
+  const hasSpeechRecognition = useMemo(() => {
+    if (typeof window === 'undefined') return false
+    return 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window
+  }, [])
+
+  // Инициализация распознавания речи
+  useEffect(() => {
+    if (!hasSpeechRecognition) {
+      console.warn('Браузер не поддерживает распознавание речи')
+      return
+    }
+
+    try {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+      recognitionRef.current = new SpeechRecognition()
+      
+      // Настройки распознавания
+      recognitionRef.current.continuous = true
+      recognitionRef.current.interimResults = true
+      recognitionRef.current.lang = 'ru-RU'
+      recognitionRef.current.maxAlternatives = 1
+
+      recognitionRef.current.onresult = (event: any) => {
+        let finalTranscript = ''
+        let interimTranscript = ''
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript
+          if (event.results[i].isFinal) {
+            finalTranscript += transcript + ' '
+          } else {
+            interimTranscript += transcript
+          }
+        }
+
+        // Обновляем промежуточный текст
+        if (interimTranscript) {
+          setInterimText(interimTranscript)
+        }
+
+        // Добавляем финальный распознанный текст
+        if (finalTranscript) {
+          setInput(prev => prev + finalTranscript)
+          setInterimText('')
+        }
+      }
+
+      recognitionRef.current.onerror = (event: any) => {
+        console.error('Ошибка распознавания речи:', event.error)
+        let errorMessage = 'Ошибка распознавания речи'
+        
+        switch (event.error) {
+          case 'not-allowed':
+          case 'permission-denied':
+            errorMessage = 'Разрешите доступ к микрофону'
+            break
+          case 'network':
+            errorMessage = 'Проблемы с сетью'
+            break
+          case 'audio-capture':
+            errorMessage = 'Микрофон не найден'
+            break
+          default:
+            errorMessage = `Ошибка: ${event.error}`
+        }
+        
+        setSpeechError(errorMessage)
+        setIsListening(false)
+        setInterimText('')
+      }
+
+      recognitionRef.current.onend = () => {
+        setIsListening(false)
+        setInterimText('')
+      }
+
+      recognitionRef.current.onstart = () => {
+        setSpeechError(null)
+        setInterimText('')
+        console.log('Распознавание речи начато')
+      }
+
+    } catch (error) {
+      console.error('Ошибка инициализации распознавания речи:', error)
+      setSpeechError('Не удалось инициализировать распознавание речи')
+    }
+
+    return () => {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop()
+        } catch (e) {
+          // Игнорируем ошибки при остановке
+        }
+      }
+    }
+  }, [hasSpeechRecognition])
+
+  // Функции для управления распознаванием речи
+  const startListening = useCallback(() => {
+    if (!recognitionRef.current) {
+      setSpeechError('Распознавание речи не поддерживается вашим браузером')
+      return
+    }
+
+    try {
+      setSpeechError(null)
+      setInterimText('')
+      recognitionRef.current.start()
+      setIsListening(true)
+    } catch (err) {
+      console.error('Ошибка запуска распознавания:', err)
+      setSpeechError('Не удалось начать запись. Проверьте доступ к микрофону.')
+      setIsListening(false)
+    }
+  }, [])
+
+  const stopListening = useCallback(() => {
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop()
+      } catch (err) {
+        console.error('Ошибка остановки распознавания:', err)
+      }
+    }
+    setIsListening(false)
+    setInterimText('')
+  }, [])
+
+  const toggleListening = useCallback(() => {
+    if (isListening) {
+      stopListening()
+    } else {
+      startListening()
+    }
+  }, [isListening, startListening, stopListening])
+
+  const clearInput = useCallback(() => {
+    setInput('')
+    setInterimText('')
+    setSpeechError(null)
+  }, [])
 
   // Автоматическая прокрутка к новым сообщениям
   const scrollToBottom = useCallback(() => {
@@ -149,12 +306,18 @@ export default function Home() {
   const handleSendMessage = useCallback(async () => {
     if (!input.trim() || isLoading) return
     
+    // Останавливаем запись если активна
+    if (isListening) {
+      stopListening()
+    }
+    
     try {
       await sendMessage(input, {
         temperature,
         streaming: useStreaming
       })
       setInput('')
+      setInterimText('')
     } catch (error) {
       console.error('Ошибка отправки сообщения:', error)
       
@@ -181,7 +344,7 @@ export default function Home() {
         textareaRef.current.focus()
       }
     }
-  }, [input, isLoading, sendMessage, temperature, useStreaming])
+  }, [input, isLoading, sendMessage, temperature, useStreaming, isListening, stopListening])
 
   const handleKeyPress = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -281,8 +444,9 @@ export default function Home() {
   useEffect(() => {
     return () => {
       stopSpeech()
+      stopListening()
     }
-  }, [stopSpeech])
+  }, [stopSpeech, stopListening])
 
   // Закрытие sidebar при нажатии Escape
   useEffect(() => {
@@ -295,6 +459,13 @@ export default function Home() {
     document.addEventListener('keydown', handleEscape)
     return () => document.removeEventListener('keydown', handleEscape)
   }, [sidebarOpen])
+
+  // Для отладки - проверяем состояние распознавания речи
+  useEffect(() => {
+    console.log('Speech recognition support:', hasSpeechRecognition)
+    console.log('Is listening:', isListening)
+    console.log('Speech error:', speechError)
+  }, [hasSpeechRecognition, isListening, speechError])
 
   // Показываем скелетон пока данные не загрузились
   if (!isInitialized) {
@@ -401,6 +572,7 @@ export default function Home() {
                         setCurrentSessionId(session.id)
                         setSidebarOpen(false)
                         stopSpeech() // Останавливаем речь при смене сессии
+                        stopListening() // Останавливаем запись при смене сессии
                       }}
                       role="button"
                       tabIndex={0}
@@ -546,6 +718,24 @@ export default function Home() {
                 </div>
               )}
               
+              {isListening && (
+                <div className="flex items-center space-x-2 px-3 py-1.5 bg-red-100 text-red-700 rounded-lg text-sm">
+                  <div className="flex space-x-1">
+                    <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+                    <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" style={{ animationDelay: '0.1s' }}></div>
+                    <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
+                  </div>
+                  <span>Запись...</span>
+                  <button
+                    onClick={stopListening}
+                    className="p-1 hover:bg-red-200 rounded transition-colors"
+                    aria-label="Остановить запись"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
+              
               {isLoading && (
                 <button
                   onClick={cancelRequest}
@@ -572,6 +762,7 @@ export default function Home() {
                       if (window.confirm('Вы уверены, что хотите очистить историю сообщений?')) {
                         clearMessages()
                         stopSpeech()
+                        stopListening()
                       }
                     }}
                     className="px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors font-medium"
@@ -659,45 +850,116 @@ export default function Home() {
           )}
         </div>
 
-        
-
         {/* Input Area */}
         <div className="border-t border-gray-200/50 bg-white/80 backdrop-blur-sm p-6">
           <div className="max-w-4xl mx-auto">
-            <div className="flex space-x-4">
-              <textarea
-                ref={textareaRef}
-                value={input}
-                onChange={(e) => {
-                  if (e.target.value.length <= MAX_INPUT_LENGTH) {
-                    setInput(e.target.value)
-                  }
-                }}
-                onKeyPress={handleKeyPress}
-                placeholder="Введите ваше сообщение..."
-                className="flex-1 border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none bg-white/50 backdrop-blur-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                rows={1}
-                disabled={isLoading}
-                style={{ minHeight: '56px', maxHeight: '200px' }}
-                aria-label="Введите сообщение"
-                aria-describedby="input-help"
-              />
-              <button
-                onClick={handleSendMessage}
-                disabled={isLoading || !input.trim()}
-                className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 disabled:from-gray-400 disabled:to-gray-500 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 shadow-lg hover:shadow-xl disabled:shadow-none disabled:cursor-not-allowed self-end flex items-center space-x-2 min-w-[120px] justify-center"
-                aria-label="Отправить сообщение"
-              >
-                {isLoading ? (
-                  <LoadingDots />
-                ) : (
-                  <>
-                    <Send className="w-5 h-5" />
-                    <span>Отправить</span>
-                  </>
+            {/* Индикатор записи и промежуточный текст */}
+            {(isListening || interimText) && (
+              <div className="mb-3 space-y-2">
+                {isListening && (
+                  <div className="flex items-center space-x-2 text-sm text-red-500">
+                    <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
+                    <span>Запись... Говорите сейчас</span>
+                  </div>
                 )}
-              </button>
+                
+                {interimText && (
+                  <div className="text-sm text-gray-500 italic bg-gray-50 p-2 rounded border">
+                    <span className="font-medium">Распознается:</span> {interimText}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Сообщения об ошибках */}
+            {speechError && (
+              <div className="mb-3 text-sm text-red-600 bg-red-50 p-2 rounded border border-red-200">
+                {speechError}
+              </div>
+            )}
+
+            <div className="flex space-x-3">
+              <div className="flex-1 flex items-end space-x-3">
+                {/* Контейнер для textarea с кнопками */}
+                <div className="flex-1 relative">
+                  <textarea
+                    ref={textareaRef}
+                    value={input}
+                    onChange={(e) => {
+                      if (e.target.value.length <= MAX_INPUT_LENGTH) {
+                        setInput(e.target.value)
+                      }
+                    }}
+                    onKeyPress={handleKeyPress}
+                    placeholder="Введите ваше сообщение или используйте голосовой ввод..."
+                    className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none bg-white/50 backdrop-blur-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    rows={1}
+                    disabled={isLoading}
+                    style={{ 
+                      minHeight: '56px', 
+                      maxHeight: '200px',
+                      paddingRight: '80px' // Добавляем место для кнопок
+                    }}
+                    aria-label="Введите сообщение"
+                    aria-describedby="input-help"
+                  />
+                  
+                  {/* Кнопки внутри textarea */}
+                  <div className="absolute right-2 bottom-2 flex items-center space-x-2">
+                    {/* Кнопка очистки */}
+                    {input && (
+                      <button
+                        onClick={clearInput}
+                        className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                        title="Очистить текст"
+                        aria-label="Очистить текст"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                    
+                    {/* Кнопка голосового ввода */}
+                    {hasSpeechRecognition && (
+                      <button
+                        onClick={toggleListening}
+                        disabled={isLoading}
+                        className={`p-2 rounded-lg transition-colors ${
+                          isListening 
+                            ? 'bg-red-500 text-white hover:bg-red-600' 
+                            : 'bg-blue-500 text-white hover:bg-blue-600'
+                        } disabled:opacity-50 disabled:cursor-not-allowed`}
+                        title={isListening ? "Остановить запись" : "Начать голосовой ввод"}
+                        aria-label={isListening ? "Остановить запись" : "Начать голосовой ввод"}
+                      >
+                        {isListening ? (
+                          <MicOff className="w-4 h-4" />
+                        ) : (
+                          <Mic className="w-4 h-4" />
+                        )}
+                      </button>
+                    )}
+                  </div>
+                </div>
+                
+                {/* Кнопка отправки */}
+                <button
+                  onClick={handleSendMessage}
+                  disabled={isLoading || !input.trim()}
+                  className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 disabled:from-gray-400 disabled:to-gray-500 text-white px-6 py-3 rounded-xl font-medium transition-all duration-200 shadow-lg hover:shadow-xl disabled:shadow-none disabled:cursor-not-allowed flex items-center space-x-2 min-w-[120px] justify-center"
+                  aria-label="Отправить сообщение"
+                >
+                  {isLoading ? (
+                    <LoadingDots />
+                  ) : (
+                    <>
+                      <Send className="w-5 h-5" />
+                      <span>Отправить</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
+            
             <div className="flex items-center justify-between mt-2">
               <p id="input-help" className="text-xs text-gray-500">
                 Нажмите Enter для отправки, Shift+Enter для новой строки
@@ -831,6 +1093,30 @@ export default function Home() {
                   {isSpeechReady 
                     ? 'Высококачественный синтез речи от Сбера' 
                     : 'Инициализация голосового синтезатора...'
+                  }
+                </p>
+              </div>
+
+              {/* Статус распознавания речи */}
+              <div className="p-3 bg-gray-50 rounded-lg">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-medium text-gray-900">Распознавание речи</span>
+                  {hasSpeechRecognition ? (
+                    <div className="flex items-center space-x-1 text-green-600">
+                      <Mic className="w-4 h-4" />
+                      <span className="text-sm">Доступно</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center space-x-1 text-red-600">
+                      <MicOff className="w-4 h-4" />
+                      <span className="text-sm">Не поддерживается</span>
+                    </div>
+                  )}
+                </div>
+                <p className="text-xs text-gray-500">
+                  {hasSpeechRecognition 
+                    ? 'Голосовой ввод доступен в вашем браузере' 
+                    : 'Ваш браузер не поддерживает голосовой ввод'
                   }
                 </p>
               </div>
